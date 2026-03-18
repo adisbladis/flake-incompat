@@ -8,6 +8,7 @@ let
     isPath
     attrNames
     mapAttrs
+    foldl'
     ;
 
   callSetWith =
@@ -46,13 +47,15 @@ let
     "legacyPackages"
   ];
 
-  defaultAttrProcessors = let
-    filterDrvsPerSystem = mapAttrs (_: filterDerivations);
-  in {
-    packages = filterDrvsPerSystem;
-    devShells = filterDrvsPerSystem;
-    checks = filterDrvsPerSystem;
-  };
+  defaultAttrProcessors =
+    let
+      filterDrvsPerSystem = mapAttrs (_: filterDerivations);
+    in
+    {
+      packages = filterDrvsPerSystem;
+      devShells = filterDrvsPerSystem;
+      checks = filterDrvsPerSystem;
+    };
 
   importExpr = expr: if isPath expr then import expr else expr;
 
@@ -116,9 +119,12 @@ let
           };
         }) systems
       );
-
-      flake' =
-        imported
+    in
+    foldl' (prev: fn: fn prev) imported [
+      # Get each attribute from each system
+      (
+        prev:
+        prev
         // listToAttrs (
           concatMap (
             name:
@@ -137,23 +143,28 @@ let
                 })
               ]
           ) systemFields
-        );
-    in
-    flake'
-    // listToAttrs (
-      concatMap (
-        name:
-        if !flake' ? ${name} then
-          [ ]
-        else
-          [
-            {
-              inherit name;
-              value = attrProcessors.${name} flake'.${name};
-            }
-          ]
-      ) (attrNames attrProcessors)
-    );
+        )
+      )
+      # Post-process any attributes as required
+      (
+        prev:
+        prev
+        // listToAttrs (
+          concatMap (
+            name:
+            if !prev ? ${name} then
+              [ ]
+            else
+              [
+                {
+                  inherit name;
+                  value = attrProcessors.${name} prev.${name};
+                }
+              ]
+          ) (attrNames attrProcessors)
+        )
+      )
+    ];
 in
 {
   inherit mkFlake call;
