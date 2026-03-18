@@ -6,16 +6,37 @@ let
     intersectAttrs
     functionArgs
     isPath
+    attrNames
+    mapAttrs
     ;
 
   callSetWith =
-    autoArgs: fn: args:
+    autoArgs: fn:
     let
       f = if isFunction fn then fn else import fn;
-      auto = intersectAttrs (functionArgs f) autoArgs;
-      origArgs = auto // args;
     in
-    f origArgs;
+    f (intersectAttrs (functionArgs f) autoArgs);
+
+  isDerivation = value: value.type or null == "derivation";
+
+  filterDerivations =
+    set:
+    listToAttrs (
+      concatMap (
+        name:
+        let
+          value = set.${name};
+        in
+        if isDerivation value then
+          [
+            {
+              inherit name value;
+            }
+          ]
+        else
+          [ ]
+      ) (attrNames set)
+    );
 
   defaultSystemFields = [
     "packages"
@@ -24,6 +45,14 @@ let
     "formatter"
     "legacyPackages"
   ];
+
+  defaultAttrProcessors = let
+    filterDrvsPerSystem = mapAttrs (_: filterDerivations);
+  in {
+    packages = filterDrvsPerSystem;
+    devShells = filterDrvsPerSystem;
+    checks = filterDrvsPerSystem;
+  };
 
   importExpr = expr: if isPath expr then import expr else expr;
 
@@ -54,7 +83,7 @@ let
               [
                 {
                   inherit name;
-                  value = callSet imported.${name} { };
+                  value = callSet imported.${name};
                 }
               ]
           ) systemFields
@@ -71,9 +100,10 @@ let
       },
       systems ? inputs.nixpkgs.lib.systems.flakeExposed,
       systemFields ? defaultSystemFields,
+      attrProcessors ? defaultAttrProcessors,
     }:
     let
-      imported = callSetWith inputs (importExpr expr) { };
+      imported = callSetWith inputs (importExpr expr);
 
       # A self fixpoint per system
       selfs = listToAttrs (
@@ -86,32 +116,47 @@ let
           };
         }) systems
       );
+
+      flake' =
+        imported
+        // listToAttrs (
+          concatMap (
+            name:
+            if !imported ? ${name} then
+              [ ]
+            else
+              [
+                ({
+                  inherit name;
+                  value = listToAttrs (
+                    map (system: {
+                      name = system;
+                      value = selfs.${system}.${name};
+                    }) systems
+                  );
+                })
+              ]
+          ) systemFields
+        );
     in
-    imported
+    flake'
     // listToAttrs (
       concatMap (
         name:
-        if !imported ? ${name} then
+        if !flake' ? ${name} then
           [ ]
         else
           [
-            (
-              {
-                inherit name;
-                value = listToAttrs (
-                  map (system: {
-                    name = system;
-                    value = selfs.${system}.${name};
-                  }) systems
-                );
-              }
-            )
+            {
+              inherit name;
+              value = attrProcessors.${name} flake'.${name};
+            }
           ]
-      ) systemFields
+      ) (attrNames attrProcessors)
     );
-
 in
 {
   inherit mkFlake call;
   systemFields = defaultSystemFields;
+  attrProcessors = defaultAttrProcessors;
 }
