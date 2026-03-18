@@ -40,9 +40,9 @@ in
     };
 
   legacyPackages =
-    { pkgs, self' }:
+    { pkgs, self }:
     {
-      devhell = self'.devShells.default;
+      devhell = self.devShells.default;
       inherit (pkgs) python3;
     };
 }

@@ -68,11 +68,11 @@ let
       callSet = callSetWith (
         args
         // {
-          inherit self';
+          inherit self;
         }
       );
 
-      self' =
+      self =
         imported
         // listToAttrs (
           concatMap (
@@ -89,7 +89,7 @@ let
           ) systemFields
         );
     in
-    self';
+    self;
 
   mkFlake =
     {
